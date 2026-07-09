@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('visualCoding', {
     ipcRenderer.invoke('project:saveWorkspace', projectPath, workspace),
   cleanGeneratedSources: (projectPath: string): Promise<void> =>
     ipcRenderer.invoke('project:cleanGeneratedSources', projectPath),
+  writeGeneratedFiles: (projectPath: string, files: Record<string, string>): Promise<void> =>
     ipcRenderer.invoke('project:writeGeneratedFiles', projectPath, files),
   syncBuildFiles: (projectPath: string): Promise<void> =>
     ipcRenderer.invoke('project:syncBuildFiles', projectPath),

@@ -53,9 +53,9 @@ export function Toolbar({
           onClick={onPlay}
           disabled={!projectPath || isBuilding}
           className="play"
-          title="Build and launch Minecraft 26.2"
+          title="Launches a separate Fabric dev Minecraft (not your normal launcher) with your mod loaded"
         >
-          ▶ Play Minecraft
+          ▶ Test Mod (Fabric)
         </button>
         {isBuilding && (
           <button onClick={onStop} className="danger">

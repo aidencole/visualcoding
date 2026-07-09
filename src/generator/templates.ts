@@ -20,6 +20,7 @@ export function generateAllFiles(parsed: ParsedProject): Record<string, string> 
   const clientRoot = `src/client/java/${pkgPath(pkg)}`
 
   files['gradle.properties'] = generateGradleProperties(meta)
+  files['build.gradle'] = generateBuildGradle(parsed)
   files[`src/main/java/${pkgPath(pkg)}/${toClassName(meta.modId)}Mod.java`] = generateMainMod(parsed)
   files[`src/main/java/${pkgPath(pkg)}/ModItems.java`] = generateModItems(pkg, meta.modId, items, armors)
   files[`src/main/java/${pkgPath(pkg)}/ModBlocks.java`] = generateModBlocks(pkg, meta.modId, blocks)
@@ -116,6 +117,85 @@ archives_base_name=${meta.modId}
 
 mod_id=${meta.modId}
 mod_name=${meta.modName}
+`
+}
+
+function generateBuildGradle(parsed: ParsedProject): string {
+  const { meta, mobs } = parsed
+  const geckoRepo = mobs.length
+    ? `
+repositories {
+    maven {
+        name = 'GeckoLib'
+        url = 'https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/'
+        content {
+            includeGroupByRegex("software\\\\.bernie.*")
+            includeGroup("com.eliotlash.mclib")
+            includeGroup("com.geckolib")
+        }
+    }
+}`
+    : ''
+
+  const geckoDeps = mobs.length
+    ? `
+    implementation "com.geckolib:geckolib-fabric-\${minecraft_version}:\${geckolib_version}"
+    implementation "com.eliotlash.mclib:mclib:20"`
+    : ''
+
+  return `plugins {
+    id 'net.fabricmc.fabric-loom' version "\${loom_version}"
+    id 'maven-publish'
+    id 'java'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+${geckoRepo}
+
+loom {
+    splitEnvironmentSourceSets()
+
+    mods {
+        "\${mod_id}" {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:\${minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:\${loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:\${fabric_api_version}"${geckoDeps}
+}
+
+processResources {
+    inputs.property "version", project.version
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 25
+}
+
+java {
+    withSourcesJar()
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+}
+
+jar {
+    from("LICENSE") {
+        rename { "\${it}_\${project.base.archivesName.get()}" }
+    }
+}
 `
 }
 

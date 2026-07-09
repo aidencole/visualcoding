@@ -153,7 +153,7 @@ ipcMain.handle('project:syncBuildFiles', async (_event, projectPath: string) => 
     throw new Error(`Template not found at ${templatePath}`)
   }
 
-  const rootFiles = ['build.gradle', 'settings.gradle', 'gradlew', 'gradlew.bat', 'LICENSE']
+  const rootFiles = ['settings.gradle', 'gradlew', 'gradlew.bat', 'LICENSE']
   for (const file of rootFiles) {
     const src = join(templatePath, file)
     if (existsSync(src)) {

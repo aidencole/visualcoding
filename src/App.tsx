@@ -113,7 +113,9 @@ export default function App(): JSX.Element {
 
     try {
       await handleExport()
-      setBuildOutput((prev) => prev + '\nStarting Gradle (first run downloads Minecraft — may take several minutes)...\n')
+      setBuildOutput((prev) => prev + '\nLaunching Fabric dev client (Gradle runClient)...\n')
+      setBuildOutput((prev) => prev + 'This is a separate test Minecraft with Fabric Loader + Fabric API + your mod.\n')
+      setBuildOutput((prev) => prev + 'It is NOT your normal launcher — look for "Fabric" on the main menu.\n\n')
       const result = await window.visualCoding.buildRun(projectPath, 'runClient')
       if (result.code === 0) {
         setBuildOutput((prev) => prev + '\nMinecraft closed.\n')
@@ -170,7 +172,7 @@ export default function App(): JSX.Element {
                 <li>Animated mobs with AI (Geckolib)</li>
                 <li>Player emotes</li>
                 <li>Particles, screenshake, sounds</li>
-                <li>▶ Play Minecraft button to test your mod</li>
+                <li>▶ Test Mod (Fabric) — dev Minecraft with Fabric built in</li>
               </ul>
             </div>
           ) : (

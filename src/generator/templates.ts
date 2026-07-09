@@ -11,7 +11,14 @@ import {
   toConstant
 } from './utils'
 import { ParsedProject } from './parser'
-import { generateModScheduler, generateVisualCodingActions } from './java-helpers'
+import {
+  generateBlockItemPlaceMixin,
+  generateItemEntityPickupMixin,
+  generateMixinsJson,
+  generateModScheduler,
+  generateVisualCodingActions,
+  generateVisualCodingCallbacks
+} from './java-helpers'
 
 function pkgPath(pkg: string): string {
   return pkg.replace(/\./g, '/')
@@ -35,7 +42,11 @@ export function generateAllFiles(parsed: ParsedProject): Record<string, string> 
   files[`src/main/java/${pkgPath(pkg)}/ModParticles.java`] = generateModParticles(pkg, meta.modId)
   files[`src/main/java/${pkgPath(pkg)}/VisualEffects.java`] = generateVisualEffects(pkg)
   files[`src/main/java/${pkgPath(pkg)}/VisualCodingActions.java`] = generateVisualCodingActions(pkg)
+  files[`src/main/java/${pkgPath(pkg)}/VisualCodingCallbacks.java`] = generateVisualCodingCallbacks(pkg)
   files[`src/main/java/${pkgPath(pkg)}/ModScheduler.java`] = generateModScheduler(pkg)
+  files[`src/main/java/${pkgPath(pkg)}/mixin/BlockItemPlaceMixin.java`] = generateBlockItemPlaceMixin(pkg)
+  files[`src/main/java/${pkgPath(pkg)}/mixin/ItemEntityPickupMixin.java`] = generateItemEntityPickupMixin(pkg)
+  files[`src/main/resources/${meta.modId}.mixins.json`] = generateMixinsJson(pkg, meta.modId)
   files[`src/main/java/${pkgPath(pkg)}/network/ScreenshakePayload.java`] = generateScreenshakePayload(
     pkg,
     meta.modId
@@ -231,6 +242,7 @@ function generateFabricModJson(pkg: string, meta: ProjectMeta, hasMobs: boolean)
         main: [`${pkg}.${toClassName(meta.modId)}Mod`],
         client: [`${pkg}.client.${toClassName(meta.modId)}ClientMod`]
       },
+      mixins: [`${meta.modId}.mixins.json`],
       depends
     },
     null,
@@ -1145,7 +1157,7 @@ ${registrations}
 
 function generateModEvents(pkg: string, globalEvents: GlobalEventDef[], blocks: BlockDef[]): string {
   const handlers: string[] = [
-    `        ServerTickEvents.END_WORLD_TICK.register(ModScheduler::tick);`
+    `        ServerTickEvents.END_LEVEL_TICK.register(ModScheduler::tick);`
   ]
 
   for (const event of globalEvents) {
@@ -1190,21 +1202,20 @@ ${body}
         });`)
     }
     if (event.type === 'player_chat') {
-      handlers.push(`        ServerMessageEvents.ALLOW_CHAT_MESSAGE.register((message, sender, params) -> {
+      handlers.push(`        ServerMessageEvents.CHAT_MESSAGE.register((message, sender, boundChatType) -> {
             ServerPlayer player = sender;
             Level world = player.level();
 ${body}
-            return true;
         });`)
     }
     if (event.type === 'block_place') {
-      handlers.push(`        PlayerBlockPlaceEvents.AFTER.register((world, player, pos, state, blockEntity) -> {
+      handlers.push(`        VisualCodingCallbacks.BLOCK_PLACE.register((world, player, pos, state) -> {
             Level level = world;
 ${body}
         });`)
     }
     if (event.type === 'item_pickup') {
-      handlers.push(`        EntityPickupEvents.ENTITY_PICKUP.register((world, player, itemEntity, stack) -> {
+      handlers.push(`        VisualCodingCallbacks.ITEM_PICKUP.register((world, player, itemEntity) -> {
             Level level = world;
 ${body}
         });`)
@@ -1228,10 +1239,8 @@ import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
-import net.fabricmc.fabric.api.event.player.PlayerBlockPlaceEvents;
-import net.fabricmc.fabric.api.message.ServerMessageEvents;
+import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
-import net.fabricmc.fabric.api.event.player.EntityPickupEvents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -1247,6 +1256,7 @@ import ${pkg}.ModItems;
 import ${pkg}.ModParticles;
 import ${pkg}.ModScheduler;
 import ${pkg}.VisualCodingActions;
+import ${pkg}.VisualCodingCallbacks;
 import ${pkg}.VisualEffects;
 
 public final class ModEvents {

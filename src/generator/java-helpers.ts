@@ -1,3 +1,113 @@
+export function generateVisualCodingCallbacks(pkg: string): string {
+  return `package ${pkg};
+
+import net.fabricmc.fabric.api.event.Event;
+import net.fabricmc.fabric.api.event.EventFactory;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.level.block.state.BlockState;
+
+public final class VisualCodingCallbacks {
+    @FunctionalInterface
+    public interface BlockPlace {
+        void afterPlace(ServerLevel world, ServerPlayer player, BlockPos pos, BlockState state);
+    }
+
+    @FunctionalInterface
+    public interface ItemPickup {
+        void onPickup(ServerLevel world, ServerPlayer player, ItemEntity itemEntity);
+    }
+
+    public static final Event<BlockPlace> BLOCK_PLACE = EventFactory.createArrayBacked(BlockPlace.class,
+        listeners -> (world, player, pos, state) -> {
+            for (BlockPlace listener : listeners) {
+                listener.afterPlace(world, player, pos, state);
+            }
+        });
+
+    public static final Event<ItemPickup> ITEM_PICKUP = EventFactory.createArrayBacked(ItemPickup.class,
+        listeners -> (world, player, entity) -> {
+            for (ItemPickup listener : listeners) {
+                listener.onPickup(world, player, entity);
+            }
+        });
+
+    private VisualCodingCallbacks() {}
+}
+`
+}
+
+export function generateBlockItemPlaceMixin(pkg: string): string {
+  return `package ${pkg}.mixin;
+
+import ${pkg}.VisualCodingCallbacks;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.level.block.state.BlockState;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(BlockItem.class)
+public abstract class BlockItemPlaceMixin {
+    @Inject(method = "useOn", at = @At("RETURN"))
+    private void visualcoding$afterPlace(UseOnContext context, CallbackInfoReturnable<InteractionResult> cir) {
+        if (!cir.getReturnValue().consumesAction()) return;
+        if (!(context.getLevel() instanceof ServerLevel level)) return;
+        if (!(context.getPlayer() instanceof ServerPlayer player)) return;
+        BlockPos placed = context.getClickedPos().relative(context.getClickedFace());
+        BlockState state = level.getBlockState(placed);
+        VisualCodingCallbacks.BLOCK_PLACE.invoker().afterPlace(level, player, placed, state);
+    }
+}
+`
+}
+
+export function generateItemEntityPickupMixin(pkg: string): string {
+  return `package ${pkg}.mixin;
+
+import ${pkg}.VisualCodingCallbacks;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Player;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+@Mixin(ItemEntity.class)
+public abstract class ItemEntityPickupMixin {
+    @Inject(method = "playerTouch", at = @At("HEAD"))
+    private void visualcoding$onPickup(Player player, CallbackInfo ci) {
+        if (!(player.level() instanceof ServerLevel level)) return;
+        if (!(player instanceof ServerPlayer serverPlayer)) return;
+        VisualCodingCallbacks.ITEM_PICKUP.invoker().onPickup(level, serverPlayer, (ItemEntity) (Object) this);
+    }
+}
+`
+}
+
+export function generateMixinsJson(pkg: string, modId: string): string {
+  return JSON.stringify(
+    {
+      required: true,
+      package: `${pkg}.mixin`,
+      compatibilityLevel: 'JAVA_25',
+      mixins: ['BlockItemPlaceMixin', 'ItemEntityPickupMixin']
+    },
+    null,
+    2
+  )
+}
+
 export function generateVisualCodingActions(pkg: string): string {
   return `package ${pkg};
 
@@ -15,22 +125,17 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.entity.projectile.Arrow;
-import net.minecraft.world.entity.projectile.LargeFireball;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.storage.ServerLevelData;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import ${pkg}.ModItems;
 
 import java.util.List;
-import java.util.function.Consumer;
 
 public final class VisualCodingActions {
     private VisualCodingActions() {}
@@ -53,7 +158,7 @@ public final class VisualCodingActions {
 
     public static <T extends Entity> void summonEntity(ServerLevel level, EntityType<T> type, BlockPos pos, int count) {
         for (int i = 0; i < count; i++) {
-            BlockPos spawn = pos.offset(level.random.nextInt(5) - 2, 1, level.random.nextInt(5) - 2);
+            BlockPos spawn = pos.offset(level.getRandom().nextInt(5) - 2, 1, level.getRandom().nextInt(5) - 2);
             type.spawn(level, spawn, EntitySpawnReason.COMMAND);
         }
     }
@@ -80,14 +185,14 @@ public final class VisualCodingActions {
         EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.getValue(Identifier.fromNamespaceAndPath("minecraft", path));
         if (type == null) return;
         for (int i = 0; i < count; i++) {
-            BlockPos spawn = pos.offset(level.random.nextInt(5) - 2, 1, level.random.nextInt(5) - 2);
+            BlockPos spawn = pos.offset(level.getRandom().nextInt(5) - 2, 1, level.getRandom().nextInt(5) - 2);
             type.spawn(level, spawn, EntitySpawnReason.COMMAND);
         }
     }
 
     public static void killNearbyMobs(ServerLevel level, Player player, double range) {
         AABB box = player.getBoundingBox().inflate(range);
-        List<Mob> mobs = level.getEntitiesOfClass(Mob.class, box, e -> e != player);
+        List<Mob> mobs = level.getEntitiesOfClass(Mob.class, box, Mob::isAlive);
         for (Mob mob : mobs) mob.discard();
     }
 
@@ -112,11 +217,11 @@ public final class VisualCodingActions {
     }
 
     public static void setTime(ServerLevel level, long time) {
-        level.setDayTime(time);
+        runAt(level, BlockPos.ZERO, "time set " + time);
     }
 
     public static void actionBar(ServerPlayer player, String message) {
-        player.displayClientMessage(Component.literal(message), true);
+        player.sendSystemMessage(Component.literal(message), true);
     }
 
     public static void giveBlockItem(Player player, String blockKey, int count) {
@@ -178,16 +283,11 @@ public final class VisualCodingActions {
     }
 
     public static void shootArrow(ServerLevel level, Player player, float power) {
-        Arrow arrow = new Arrow(level, player, new ItemStack(Items.ARROW), player.getUsedItemHand());
-        arrow.shootFromRotation(player, player.getXRot(), player.getYRot(), 0.0f, power, 1.0f);
-        level.addFreshEntity(arrow);
+        runAt(level, player.blockPosition(), "summon arrow ~ ~1 ~");
     }
 
     public static void shootFireball(ServerLevel level, Player player) {
-        Vec3 look = player.getLookAngle();
-        LargeFireball fireball = new LargeFireball(level, player, look.scale(0.1), 1);
-        fireball.setPos(player.getX(), player.getEyeY() - 0.1, player.getZ());
-        level.addFreshEntity(fireball);
+        runAt(level, player.blockPosition(), "summon fireball ~ ~1 ~");
     }
 
     public static void launchEntity(LivingEntity entity, float strength) {
@@ -215,8 +315,7 @@ public final class VisualCodingActions {
     private static void runAt(ServerLevel level, BlockPos pos, String command) {
         var source = level.getServer().createCommandSourceStack()
             .withLevel(level)
-            .withPosition(Vec3.atCenterOf(pos))
-            .withPermission(2);
+            .withPosition(Vec3.atCenterOf(pos));
         level.getServer().getCommands().performPrefixedCommand(source, command);
     }
 }
@@ -254,7 +353,17 @@ public final class ModScheduler {
         }
     }
 
-    private record ScheduledTask(ServerLevel level, int ticks, Runnable task) {}
+    private static final class ScheduledTask {
+        final ServerLevel level;
+        int ticks;
+        final Runnable task;
+
+        ScheduledTask(ServerLevel level, int ticks, Runnable task) {
+            this.level = level;
+            this.ticks = ticks;
+            this.task = task;
+        }
+    }
 }
 `
 }

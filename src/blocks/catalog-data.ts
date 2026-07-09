@@ -284,7 +284,7 @@ export const EXTRA_EVENT_BLOCKS: BlockSpec[] = [
   },
   {
     type: 'on_left_click_block',
-    color: GLOBAL_COLOR,
+    color: EVENT_COLOR,
     previous: 'ItemBehavior',
     next: 'ItemBehavior',
     label: 'When player left-clicks block with item',
@@ -292,7 +292,7 @@ export const EXTRA_EVENT_BLOCKS: BlockSpec[] = [
   },
   {
     type: 'on_finish_using',
-    color: GLOBAL_COLOR,
+    color: EVENT_COLOR,
     previous: 'ItemBehavior',
     next: 'ItemBehavior',
     label: 'When player finishes using item',

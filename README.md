@@ -93,7 +93,7 @@ my-mod-project/
 | Problem | Fix |
 |---------|-----|
 | **`Error: Electron uninstall`** | Electron's app binary didn't download. Run: `npm run fix-electron` then `npm run dev`. |
-| **`electron.exe` missing** (only `LICENSES.chromium.html` in `node_modules\electron\dist`) | **Windows antivirus deleted electron.exe.** Add a Windows Security exclusion for your project folder, restore `electron.exe` from quarantine if listed, then run `npm run fix-electron` again. |
+| **`electron.exe` missing** (only `LICENSES.chromium.html` in `node_modules\electron\dist`) | Windows antivirus deleted `electron.exe`. Add exclusions for **both** your project folder **and** `.electron-cache` inside it. Then run `npm run fix-electron`. If still broken: `npm run fix-electron:ps` or download the zip manually from GitHub releases (see script output). |
 | Play button fails | Install Java 21, ensure it's on your PATH |
 | First build very slow | Normal — Gradle downloads Minecraft + libraries |
 | Mob has no model | Check geo/animation/texture paths match block fields |

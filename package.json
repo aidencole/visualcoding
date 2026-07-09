@@ -8,6 +8,7 @@
   "scripts": {
     "postinstall": "node scripts/ensure-electron.cjs",
     "fix-electron": "node scripts/fix-electron.cjs",
+    "fix-electron:ps": "powershell -ExecutionPolicy Bypass -File scripts/fix-electron.ps1",
     "dev": "node scripts/ensure-electron.cjs && electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",

@@ -92,6 +92,7 @@ my-mod-project/
 
 | Problem | Fix |
 |---------|-----|
+| **`Error: Electron uninstall`** | Electron's app binary didn't download. Run: `npm run fix-electron` then `npm run dev`. If that fails, delete `node_modules`, run `npm install` again. On Windows, allow the download through antivirus/firewall. |
 | Play button fails | Install Java 21, ensure it's on your PATH |
 | First build very slow | Normal — Gradle downloads Minecraft + libraries |
 | Mob has no model | Check geo/animation/texture paths match block fields |

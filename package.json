@@ -6,7 +6,9 @@
   "author": "VisualCoding",
   "license": "MIT",
   "scripts": {
-    "dev": "electron-vite dev",
+    "postinstall": "node scripts/ensure-electron.cjs",
+    "fix-electron": "node node_modules/electron/install.js",
+    "dev": "node scripts/ensure-electron.cjs && electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "package": "npm run build && electron-builder --win --linux --mac",

@@ -8,7 +8,8 @@ import {
   writeFileSync,
   cpSync,
   readdirSync,
-  statSync
+  statSync,
+  rmSync
 } from 'fs'
 
 let mainWindow: BrowserWindow | null = null

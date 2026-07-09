@@ -100,11 +100,12 @@ export function generateAllFiles(parsed: ParsedProject): Record<string, string> 
 function generateGradleProperties(meta: ProjectMeta): string {
   return `org.gradle.jvmargs=-Xmx2G
 org.gradle.parallel=true
+org.gradle.configuration-cache=false
 
 minecraft_version=26.2
-yarn_mappings=26.2+build.1
 loader_version=0.19.3
-fabric_version=0.154.2+26.2
+loom_version=1.17-SNAPSHOT
+fabric_api_version=0.154.2+26.2
 geckolib_version=5.5.1
 
 mod_version=1.0.0
@@ -134,7 +135,7 @@ function generateFabricModJson(pkg: string, meta: ProjectMeta): string {
       depends: {
         fabricloader: '>=0.19.0',
         minecraft: '~26.2',
-        java: '>=21',
+        java: '>=25',
         fabric: '*',
         geckolib: '*'
       }
@@ -206,16 +207,10 @@ ${emotes.length ? '        EmoteRegistry.registerCommands();' : ''}
 
 function generateModItems(pkg: string, modId: string, items: ItemDef[], armors: ArmorDef[]): string {
   const itemRegs = items
-    .map(
-      (i) =>
-        `        ${toConstant(i.id)} = Registry.register(BuiltInRegistries.ITEM, ResourceLocation.fromNamespaceAndPath(MOD_ID, "${i.id}"), new ${i.className}());`
-    )
+    .map((i) => `        ${toConstant(i.id)} = registerItem("${i.id}", ${i.className}::new);`)
     .join('\n')
   const armorRegs = armors
-    .map(
-      (a) =>
-        `        ${toConstant(a.id)} = Registry.register(BuiltInRegistries.ITEM, ResourceLocation.fromNamespaceAndPath(MOD_ID, "${a.id}"), new ${a.className}());`
-    )
+    .map((a) => `        ${toConstant(a.id)} = registerItem("${a.id}", ${a.className}::new);`)
     .join('\n')
   const itemFields = items.map((i) => `    public static Item ${toConstant(i.id)};`).join('\n')
   const armorFields = armors.map((a) => `    public static Item ${toConstant(a.id)};`).join('\n')
@@ -225,8 +220,12 @@ function generateModItems(pkg: string, modId: string, items: ItemDef[], armors: 
 import ${pkg}.item.*;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.Item;
+
+import java.util.function.Function;
 
 public class ModItems {
     public static final String MOD_ID = ${toClassName(modId)}Mod.MOD_ID;
@@ -236,6 +235,12 @@ ${armorFields}
     public static void register() {
 ${itemRegs || '        // No items'}
 ${armorRegs || '        // No armor'}
+    }
+
+    private static Item registerItem(String name, Function<Item.Properties, Item> factory) {
+        ResourceKey<Item> key = ResourceKey.create(Registries.ITEM, Identifier.fromNamespaceAndPath(MOD_ID, name));
+        Item item = factory.apply(new Item.Properties().setId(key));
+        return Registry.register(BuiltInRegistries.ITEM, key, item);
     }
 }
 `
@@ -270,8 +275,8 @@ import ${pkg}.ModParticles;
 import ${pkg}.VisualEffects;
 
 public class ${item.className} extends Item {
-    public ${item.className}() {
-        super(new Item.Properties());
+    public ${item.className}(Item.Properties settings) {
+        super(settings);
     }
 ${useMethod}
 }
@@ -280,10 +285,7 @@ ${useMethod}
 
 function generateModBlocks(pkg: string, modId: string, blocks: BlockDef[]): string {
   const regs = blocks
-    .map(
-      (b) =>
-        `        ${toConstant(b.id)} = Registry.register(BuiltInRegistries.BLOCK, ResourceLocation.fromNamespaceAndPath(MOD_ID, "${b.id}"), new ${b.className}());`
-    )
+    .map((b) => `        ${toConstant(b.id)} = registerBlock("${b.id}", ${b.className}::new);`)
     .join('\n')
   const fields = blocks.map((b) => `    public static Block ${toConstant(b.id)};`).join('\n')
 
@@ -292,8 +294,12 @@ function generateModBlocks(pkg: string, modId: string, blocks: BlockDef[]): stri
 import ${pkg}.block.*;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.block.Block;
+
+import java.util.function.Function;
 
 public class ModBlocks {
     public static final String MOD_ID = ${toClassName(modId)}Mod.MOD_ID;
@@ -301,6 +307,12 @@ ${fields}
 
     public static void register() {
 ${regs || '        // No blocks'}
+    }
+
+    private static Block registerBlock(String name, Function<ResourceKey<Block>, Block> factory) {
+        ResourceKey<Block> key = ResourceKey.create(Registries.BLOCK, Identifier.fromNamespaceAndPath(MOD_ID, name));
+        Block block = factory.apply(key);
+        return Registry.register(BuiltInRegistries.BLOCK, key, block);
     }
 }
 `
@@ -330,6 +342,8 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
@@ -338,8 +352,8 @@ import ${pkg}.ModParticles;
 import ${pkg}.VisualEffects;
 
 public class ${block.className} extends Block {
-    public ${block.className}() {
-        super(BlockBehaviour.Properties.of().strength(${block.hardness}f));
+    public ${block.className}(ResourceKey<Block> key) {
+        super(BlockBehaviour.Properties.of().setId(key).strength(${block.hardness}f));
     }
 ${useMethod}
 }
@@ -350,8 +364,7 @@ function generateModEntities(pkg: string, modId: string, mobs: MobDef[]): string
   const regs = mobs
     .map(
       (m) =>
-        `        ${toConstant(m.id)} = Registry.register(BuiltInRegistries.ENTITY_TYPE, ResourceLocation.fromNamespaceAndPath(MOD_ID, "${m.id}"),
-            EntityType.Builder.of(${m.className}::new, MobCategory.MONSTER).sized(0.9f, 1.8f).build("${m.id}"));`
+        `        ${toConstant(m.id)} = registerEntity("${m.id}", EntityType.Builder.of(${m.className}::new, MobCategory.MONSTER).sized(0.9f, 1.8f));`
     )
     .join('\n')
   const fields = mobs.map((m) => `    public static EntityType<${m.className}> ${toConstant(m.id)};`).join('\n')
@@ -361,7 +374,9 @@ function generateModEntities(pkg: string, modId: string, mobs: MobDef[]): string
 import ${pkg}.entity.*;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
 
@@ -371,6 +386,13 @@ ${fields}
 
     public static void register() {
 ${regs || '        // No mobs'}
+    }
+
+    private static <T extends net.minecraft.world.entity.Entity> EntityType<T> registerEntity(
+            String name,
+            EntityType.Builder<T> builder) {
+        ResourceKey<EntityType<?>> key = ResourceKey.create(Registries.ENTITY_TYPE, Identifier.fromNamespaceAndPath(MOD_ID, name));
+        return Registry.register(BuiltInRegistries.ENTITY_TYPE, key, builder.build(key));
     }
 }
 `
@@ -448,23 +470,23 @@ function generateMobModel(pkg: string, modId: string, mob: MobDef): string {
   return `package ${pkg}.client.model;
 
 import ${pkg}.entity.${mob.className};
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import software.bernie.geckolib.model.GeoModel;
 
 public class ${mob.className}Model extends GeoModel<${mob.className}> {
     @Override
-    public ResourceLocation getModelResource(${mob.className} animatable) {
-        return ResourceLocation.fromNamespaceAndPath("${modId}", "${mob.geo}");
+    public Identifier getModelResource(${mob.className} animatable) {
+        return Identifier.fromNamespaceAndPath("${modId}", "${mob.geo}");
     }
 
     @Override
-    public ResourceLocation getTextureResource(${mob.className} animatable) {
-        return ResourceLocation.fromNamespaceAndPath("${modId}", "${mob.texture}");
+    public Identifier getTextureResource(${mob.className} animatable) {
+        return Identifier.fromNamespaceAndPath("${modId}", "${mob.texture}");
     }
 
     @Override
-    public ResourceLocation getAnimationResource(${mob.className} animatable) {
-        return ResourceLocation.fromNamespaceAndPath("${modId}", "${mob.animations}");
+    public Identifier getAnimationResource(${mob.className} animatable) {
+        return Identifier.fromNamespaceAndPath("${modId}", "${mob.animations}");
     }
 }
 `
@@ -494,8 +516,8 @@ import net.minecraft.world.item.ArmorMaterials;
 import net.minecraft.world.item.Item;
 
 public class ${armor.className} extends ArmorItem {
-    public ${armor.className}() {
-        super(ArmorMaterials.IRON, ArmorItem.Type.${armor.slot}, new Item.Properties());
+    public ${armor.className}(Item.Properties settings) {
+        super(ArmorMaterials.IRON, ArmorItem.Type.${armor.slot}, settings);
     }
 }
 `
@@ -537,15 +559,16 @@ import net.fabricmc.fabric.api.particle.v1.FabricParticleTypes;
 import net.minecraft.core.Registry;
 import net.minecraft.core.particles.SimpleParticleType;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 
 public class ModParticles {
     public static SimpleParticleType SPARK;
 
     public static void register() {
-        SPARK = Registry.register(BuiltInRegistries.PARTICLE_TYPE,
-            ResourceLocation.fromNamespaceAndPath("${modId}", "spark"),
-            FabricParticleTypes.simple());
+        ResourceKey<SimpleParticleType> key = ResourceKey.create(Registries.PARTICLE_TYPE, Identifier.fromNamespaceAndPath("${modId}", "spark"));
+        SPARK = Registry.register(BuiltInRegistries.PARTICLE_TYPE, key, FabricParticleTypes.simple());
     }
 
     public static void registerClient() {}
@@ -591,11 +614,11 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 
 public class VisualCodingNetworking {
-    public static final ResourceLocation SCREENSHAKE = ResourceLocation.fromNamespaceAndPath(${modClass}.MOD_ID, "screenshake");
+    public static final Identifier SCREENSHAKE = Identifier.fromNamespaceAndPath(${modClass}.MOD_ID, "screenshake");
 
     public static void registerServer() {}
 

@@ -94,7 +94,8 @@ my-mod-project/
 |---------|-----|
 | **`Error: Electron uninstall`** | Electron's app binary didn't download. Run: `npm run fix-electron` then `npm run dev`. |
 | **`electron.exe` missing** (only `LICENSES.chromium.html` in `node_modules\electron\dist`) | Windows antivirus deleted `electron.exe`. Add exclusions for **both** your project folder **and** `.electron-cache` inside it. Then run `npm run fix-electron`. If still broken: `npm run fix-electron:ps` or download the zip manually from GitHub releases (see script output). |
-| Play button fails | Install Java 21, ensure it's on your PATH |
+| Play button fails | Install **Java 25** (required for Minecraft 26.2 modding), ensure it's on your PATH |
+| Project in **OneDrive** folder | Move project to a local folder like `C:\\Users\\aiden\\Documents\\MyMods` — OneDrive causes Gradle issues |
 | First build very slow | Normal — Gradle downloads Minecraft + libraries |
 | Mob has no model | Check geo/animation/texture paths match block fields |
 | Animations don't play | Animation names in blocks must match JSON exactly |

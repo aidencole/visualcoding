@@ -12,6 +12,7 @@ export interface VisualCodingAPI {
   initProject: (projectPath: string, modId: string, modName: string) => Promise<ProjectMeta>
   loadProject: (projectPath: string) => Promise<{ meta: ProjectMeta; workspace: unknown; projectPath: string }>
   saveWorkspace: (projectPath: string, workspace: unknown) => Promise<void>
+  cleanGeneratedSources: (projectPath: string) => Promise<void>
   writeGeneratedFiles: (projectPath: string, files: Record<string, string>) => Promise<void>
   syncBuildFiles: (projectPath: string) => Promise<void>
   copyAssets: (projectPath: string) => Promise<void>

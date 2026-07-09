@@ -128,6 +128,14 @@ ipcMain.handle('project:saveWorkspace', async (_event, projectPath: string, work
   writeFileSync(join(projectPath, 'workspace.json'), JSON.stringify(workspace, null, 2))
 })
 
+ipcMain.handle('project:cleanGeneratedSources', async (_event, projectPath: string) => {
+  const generatedRoot = join(projectPath, 'generated')
+  for (const sub of ['src/main/java', 'src/client/java', 'src/main/resources']) {
+    const target = join(generatedRoot, sub)
+    if (existsSync(target)) rmSync(target, { recursive: true, force: true })
+  }
+})
+
 ipcMain.handle('project:writeGeneratedFiles', async (_event, projectPath: string, files: Record<string, string>) => {
   const generatedRoot = join(projectPath, 'generated')
   for (const [relativePath, content] of Object.entries(files)) {

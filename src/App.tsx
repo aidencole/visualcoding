@@ -92,6 +92,7 @@ export default function App(): JSX.Element {
         modName: meta.modName,
         minecraftVersion: meta.minecraftVersion
       })
+      await window.visualCoding.cleanGeneratedSources(projectPath)
       await window.visualCoding.writeGeneratedFiles(projectPath, files)
       await window.visualCoding.syncBuildFiles(projectPath)
       await window.visualCoding.copyAssets(projectPath)

@@ -17,21 +17,25 @@ function pkgPath(pkg: string): string {
 export function generateAllFiles(parsed: ParsedProject): Record<string, string> {
   const { meta, pkg, items, blocks, armors, mobs, emotes } = parsed
   const files: Record<string, string> = {}
+  const clientRoot = `src/client/java/${pkgPath(pkg)}`
 
   files['gradle.properties'] = generateGradleProperties(meta)
-  files[`src/main/java/${pkgPath(pkg)}/${toClassName(meta.modId)}Mod.java`] = generateMainMod(
-    parsed
-  )
+  files[`src/main/java/${pkgPath(pkg)}/${toClassName(meta.modId)}Mod.java`] = generateMainMod(parsed)
   files[`src/main/java/${pkgPath(pkg)}/ModItems.java`] = generateModItems(pkg, meta.modId, items, armors)
   files[`src/main/java/${pkgPath(pkg)}/ModBlocks.java`] = generateModBlocks(pkg, meta.modId, blocks)
   files[`src/main/java/${pkgPath(pkg)}/ModEntities.java`] = generateModEntities(pkg, meta.modId, mobs)
   files[`src/main/java/${pkgPath(pkg)}/ModParticles.java`] = generateModParticles(pkg, meta.modId)
   files[`src/main/java/${pkgPath(pkg)}/VisualEffects.java`] = generateVisualEffects(pkg)
-  files[`src/main/java/${pkgPath(pkg)}/client/${toClassName(meta.modId)}ClientMod.java`] =
-    generateClientMod(parsed)
-  files[`src/main/java/${pkgPath(pkg)}/network/VisualCodingNetworking.java`] =
-    generateNetworking(pkg, meta.modId)
-  files[`src/main/java/${pkgPath(pkg)}/network/ScreenshakeHandler.java`] = generateScreenshakeHandler(pkg)
+  files[`src/main/java/${pkgPath(pkg)}/network/ScreenshakePayload.java`] = generateScreenshakePayload(
+    pkg,
+    meta.modId
+  )
+  files[`src/main/java/${pkgPath(pkg)}/network/VisualCodingNetworking.java`] = generateNetworking(
+    pkg,
+    meta.modId
+  )
+  files[`${clientRoot}/client/${toClassName(meta.modId)}ClientMod.java`] = generateClientMod(parsed)
+  files[`${clientRoot}/client/network/ScreenshakeHandler.java`] = generateScreenshakeHandler(pkg)
   files[`src/main/java/${pkgPath(pkg)}/emote/EmoteHandler.java`] = generateEmoteHandler(pkg)
   files[`src/main/java/${pkgPath(pkg)}/emote/EmoteRegistry.java`] = generateEmoteRegistry(pkg, emotes)
   files[`src/main/java/${pkgPath(pkg)}/emote/EmotePlayer.java`] = generateEmotePlayer(pkg, meta.modId)
@@ -71,10 +75,8 @@ export function generateAllFiles(parsed: ParsedProject): Record<string, string> 
 
   for (const mob of mobs) {
     files[`src/main/java/${pkgPath(pkg)}/entity/${mob.className}.java`] = generateMobEntity(pkg, mob)
-    files[`src/main/java/${pkgPath(pkg)}/client/renderer/${mob.className}Renderer.java`] =
-      generateMobRenderer(pkg, mob)
-    files[`src/main/java/${pkgPath(pkg)}/client/model/${mob.className}Model.java`] =
-      generateMobModel(pkg, meta.modId, mob)
+    files[`${clientRoot}/client/renderer/${mob.className}Renderer.java`] = generateMobRenderer(pkg, mob)
+    files[`${clientRoot}/client/model/${mob.className}Model.java`] = generateMobModel(pkg, meta.modId, mob)
   }
 
   for (const emote of emotes) {
@@ -84,7 +86,7 @@ export function generateAllFiles(parsed: ParsedProject): Record<string, string> 
     )
   }
 
-  files['src/main/resources/fabric.mod.json'] = generateFabricModJson(pkg, meta)
+  files['src/main/resources/fabric.mod.json'] = generateFabricModJson(pkg, meta, mobs.length > 0)
   files[`src/main/resources/assets/${meta.modId}/lang/en_us.json`] = generateLang(
     meta,
     items,
@@ -117,7 +119,15 @@ mod_name=${meta.modName}
 `
 }
 
-function generateFabricModJson(pkg: string, meta: ProjectMeta): string {
+function generateFabricModJson(pkg: string, meta: ProjectMeta, hasMobs: boolean): string {
+  const depends: Record<string, string> = {
+    fabricloader: '>=0.19.0',
+    minecraft: '~26.2',
+    java: '>=25',
+    fabric: '*'
+  }
+  if (hasMobs) depends.geckolib = '*'
+
   return JSON.stringify(
     {
       schemaVersion: 1,
@@ -132,13 +142,7 @@ function generateFabricModJson(pkg: string, meta: ProjectMeta): string {
         main: [`${pkg}.${toClassName(meta.modId)}Mod`],
         client: [`${pkg}.client.${toClassName(meta.modId)}ClientMod`]
       },
-      depends: {
-        fabricloader: '>=0.19.0',
-        minecraft: '~26.2',
-        java: '>=25',
-        fabric: '*',
-        geckolib: '*'
-      }
+      depends
     },
     null,
     2
@@ -206,6 +210,17 @@ ${emotes.length ? '        EmoteRegistry.registerCommands();' : ''}
 }
 
 function generateModItems(pkg: string, modId: string, items: ItemDef[], armors: ArmorDef[]): string {
+  if (items.length === 0 && armors.length === 0) {
+    return `package ${pkg};
+
+public class ModItems {
+    public static final String MOD_ID = ${toClassName(modId)}Mod.MOD_ID;
+
+    public static void register() {}
+}
+`
+  }
+
   const itemRegs = items
     .map((i) => `        ${toConstant(i.id)} = registerItem("${i.id}", ${i.className}::new);`)
     .join('\n')
@@ -284,6 +299,17 @@ ${useMethod}
 }
 
 function generateModBlocks(pkg: string, modId: string, blocks: BlockDef[]): string {
+  if (blocks.length === 0) {
+    return `package ${pkg};
+
+public class ModBlocks {
+    public static final String MOD_ID = ${toClassName(modId)}Mod.MOD_ID;
+
+    public static void register() {}
+}
+`
+  }
+
   const regs = blocks
     .map((b) => `        ${toConstant(b.id)} = registerBlock("${b.id}", ${b.className}::new);`)
     .join('\n')
@@ -361,6 +387,17 @@ ${useMethod}
 }
 
 function generateModEntities(pkg: string, modId: string, mobs: MobDef[]): string {
+  if (mobs.length === 0) {
+    return `package ${pkg};
+
+public class ModEntities {
+    public static final String MOD_ID = ${toClassName(modId)}Mod.MOD_ID;
+
+    public static void register() {}
+}
+`
+  }
+
   const regs = mobs
     .map(
       (m) =>
@@ -525,6 +562,7 @@ public class ${armor.className} extends ArmorItem {
 
 function generateClientMod(parsed: ParsedProject): string {
   const { pkg, meta, mobs } = parsed
+  const rendererImports = mobs.map((m) => `import ${pkg}.client.renderer.${m.className}Renderer;`).join('\n')
   const entityRenderers = mobs
     .map(
       (m) =>
@@ -536,16 +574,21 @@ function generateClientMod(parsed: ParsedProject): string {
 
 import ${pkg}.ModEntities;
 import ${pkg}.ModParticles;
-import ${pkg}.client.renderer.*;
-import ${pkg}.network.VisualCodingNetworking;
+import ${pkg}.network.ScreenshakePayload;
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+${rendererImports}
 
 public class ${toClassName(meta.modId)}ClientMod implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
 ${entityRenderers || '        // No mob renderers'}
-        VisualCodingNetworking.registerClient();
+        PayloadTypeRegistry.clientboundPlay().register(ScreenshakePayload.TYPE, ScreenshakePayload.CODEC);
+        ClientPlayNetworking.registerGlobalReceiver(ScreenshakePayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> ScreenshakeHandler.shake(payload.intensity(), payload.duration()));
+        });
         ModParticles.registerClient();
     }
 }
@@ -559,16 +602,17 @@ import net.fabricmc.fabric.api.particle.v1.FabricParticleTypes;
 import net.minecraft.core.Registry;
 import net.minecraft.core.particles.SimpleParticleType;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
-import net.minecraft.resources.ResourceKey;
 
 public class ModParticles {
     public static SimpleParticleType SPARK;
 
     public static void register() {
-        ResourceKey<SimpleParticleType> key = ResourceKey.create(Registries.PARTICLE_TYPE, Identifier.fromNamespaceAndPath("${modId}", "spark"));
-        SPARK = Registry.register(BuiltInRegistries.PARTICLE_TYPE, key, FabricParticleTypes.simple());
+        SPARK = Registry.register(
+            BuiltInRegistries.PARTICLE_TYPE,
+            Identifier.fromNamespaceAndPath("${modId}", "spark"),
+            FabricParticleTypes.simple()
+        );
     }
 
     public static void registerClient() {}
@@ -581,19 +625,28 @@ function generateVisualEffects(pkg: string): string {
 
 import ${pkg}.network.VisualCodingNetworking;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.SimpleParticleType;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
-import net.minecraft.core.particles.SimpleParticleType;
 
 public final class VisualEffects {
     private VisualEffects() {}
 
     public static void spawnParticles(Level world, BlockPos pos, SimpleParticleType particle, int count) {
-        if (world.isClientSide()) return;
-        for (int i = 0; i < count; i++) {
-            world.sendParticles(particle, pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5, 1, 0.2, 0.2, 0.2, 0.05);
-        }
+        if (!(world instanceof ServerLevel serverLevel)) return;
+        serverLevel.sendParticles(
+            particle,
+            pos.getX() + 0.5,
+            pos.getY() + 1.0,
+            pos.getZ() + 0.5,
+            count,
+            0.2,
+            0.2,
+            0.2,
+            0.05
+        );
     }
 
     public static void shakeScreen(Player player, float intensity, float duration) {
@@ -605,43 +658,56 @@ public final class VisualEffects {
 `
 }
 
-function generateNetworking(pkg: string, modId: string): string {
+function generateScreenshakePayload(pkg: string, modId: string): string {
   const modClass = `${toClassName(modId)}Mod`
   return `package ${pkg}.network;
 
 import ${pkg}.${modClass};
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
+
+public record ScreenshakePayload(float intensity, float duration) implements CustomPacketPayload {
+    public static final CustomPacketPayload.Type<ScreenshakePayload> TYPE =
+        new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath(${modClass}.MOD_ID, "screenshake"));
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, ScreenshakePayload> CODEC = StreamCodec.composite(
+        ByteBufCodecs.FLOAT, ScreenshakePayload::intensity,
+        ByteBufCodecs.FLOAT, ScreenshakePayload::duration,
+        ScreenshakePayload::new
+    );
+
+    @Override
+    public Type<? extends CustomPacketPayload> type() {
+        return TYPE;
+    }
+}
+`
+}
+
+function generateNetworking(pkg: string, modId: string): string {
+  return `package ${pkg}.network;
+
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.level.ServerPlayer;
 
 public class VisualCodingNetworking {
-    public static final Identifier SCREENSHAKE = Identifier.fromNamespaceAndPath(${modClass}.MOD_ID, "screenshake");
-
-    public static void registerServer() {}
-
-    public static void registerClient() {
-        ClientPlayNetworking.registerGlobalReceiver(SCREENSHAKE, (client, handler, buf, responseSender) -> {
-            float intensity = buf.readFloat();
-            float duration = buf.readFloat();
-            client.execute(() -> ScreenshakeHandler.shake(intensity, duration));
-        });
+    public static void registerServer() {
+        PayloadTypeRegistry.clientboundPlay().register(ScreenshakePayload.TYPE, ScreenshakePayload.CODEC);
     }
 
     public static void sendScreenshake(ServerPlayer player, float intensity, float duration) {
-        FriendlyByteBuf buf = PacketByteBufs.create();
-        buf.writeFloat(intensity);
-        buf.writeFloat(duration);
-        ServerPlayNetworking.send(player, SCREENSHAKE, buf);
+        ServerPlayNetworking.send(player, new ScreenshakePayload(intensity, duration));
     }
 }
 `
 }
 
 function generateScreenshakeHandler(pkg: string): string {
-  return `package ${pkg}.network;
+  return `package ${pkg}.client;
 
 import net.minecraft.client.Minecraft;
 

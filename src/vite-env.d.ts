@@ -13,6 +13,7 @@ export interface VisualCodingAPI {
   loadProject: (projectPath: string) => Promise<{ meta: ProjectMeta; workspace: unknown; projectPath: string }>
   saveWorkspace: (projectPath: string, workspace: unknown) => Promise<void>
   writeGeneratedFiles: (projectPath: string, files: Record<string, string>) => Promise<void>
+  syncBuildFiles: (projectPath: string) => Promise<void>
   copyAssets: (projectPath: string) => Promise<void>
   listAssets: (projectPath: string) => Promise<{ path: string; type: string }[]>
   buildRun: (projectPath: string, task: string) => Promise<{ code: number; output: string }>

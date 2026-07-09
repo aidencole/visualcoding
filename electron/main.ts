@@ -137,6 +137,27 @@ ipcMain.handle('project:writeGeneratedFiles', async (_event, projectPath: string
   }
 })
 
+ipcMain.handle('project:syncBuildFiles', async (_event, projectPath: string) => {
+  const templatePath = join(getTemplatesPath(), 'fabric-mod')
+  const generatedRoot = join(projectPath, 'generated')
+  if (!existsSync(templatePath)) {
+    throw new Error(`Template not found at ${templatePath}`)
+  }
+
+  const rootFiles = ['build.gradle', 'settings.gradle', 'gradlew', 'gradlew.bat', 'LICENSE']
+  for (const file of rootFiles) {
+    const src = join(templatePath, file)
+    if (existsSync(src)) {
+      cpSync(src, join(generatedRoot, file))
+    }
+  }
+
+  const gradleWrapper = join(templatePath, 'gradle')
+  if (existsSync(gradleWrapper)) {
+    cpSync(gradleWrapper, join(generatedRoot, 'gradle'), { recursive: true })
+  }
+})
+
 ipcMain.handle('project:copyAssets', async (_event, projectPath: string) => {
   const assetsSrc = join(projectPath, 'assets')
   const assetsDest = join(projectPath, 'generated', 'src', 'main', 'resources', 'assets')

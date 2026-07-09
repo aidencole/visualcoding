@@ -93,8 +93,10 @@ export default function App(): JSX.Element {
         minecraftVersion: meta.minecraftVersion
       })
       await window.visualCoding.writeGeneratedFiles(projectPath, files)
+      await window.visualCoding.syncBuildFiles(projectPath)
       await window.visualCoding.copyAssets(projectPath)
       setBuildOutput((prev) => prev + `Generated ${Object.keys(files).length} files.\n`)
+      setBuildOutput((prev) => prev + 'Gradle build files synced.\n')
       setBuildOutput((prev) => prev + 'Assets copied to mod resources.\n')
       await refreshAssets(projectPath)
     } catch (err) {

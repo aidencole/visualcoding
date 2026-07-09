@@ -204,7 +204,7 @@ function generateFabricModJson(pkg: string, meta: ProjectMeta, hasMobs: boolean)
     fabricloader: '>=0.19.0',
     minecraft: '~26.2',
     java: '>=25',
-    fabric: '*'
+    'fabric-api': '*'
   }
   if (hasMobs) depends.geckolib = '*'
 

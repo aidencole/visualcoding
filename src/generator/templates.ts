@@ -658,14 +658,12 @@ import ${pkg}.network.ScreenshakePayload;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry;
-import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 ${rendererImports}
 
 public class ${toClassName(meta.modId)}ClientMod implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
 ${entityRenderers || '        // No mob renderers'}
-        PayloadTypeRegistry.clientboundPlay().register(ScreenshakePayload.TYPE, ScreenshakePayload.CODEC);
         ClientPlayNetworking.registerGlobalReceiver(ScreenshakePayload.TYPE, (payload, context) -> {
             context.client().execute(() -> ScreenshakeHandler.shake(payload.intensity(), payload.duration()));
         });

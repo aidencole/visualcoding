@@ -7,7 +7,7 @@
   "license": "MIT",
   "scripts": {
     "postinstall": "node scripts/ensure-electron.cjs",
-    "fix-electron": "node node_modules/electron/install.js",
+    "fix-electron": "node scripts/fix-electron.cjs",
     "dev": "node scripts/ensure-electron.cjs && electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",

@@ -3,7 +3,9 @@ import {
   ActionContext,
   ArmorDef,
   BlockDef,
+  CommandDef,
   EmoteDef,
+  GlobalEventDef,
   ItemDef,
   MobAIConfig,
   MobAnimConfig,
@@ -22,30 +24,110 @@ export interface ParsedProject {
   armors: ArmorDef[]
   mobs: MobDef[]
   emotes: EmoteDef[]
+  commands: CommandDef[]
+  globalEvents: GlobalEventDef[]
 }
 
 function parseMobAI(block: Blockly.Block | null): MobAIConfig {
-  const config: MobAIConfig = { wander: false, chaseRange: 16, attackRange: 2 }
+  const config: MobAIConfig = {
+    wander: false,
+    chaseRange: 16,
+    attackRange: 2,
+    fleeHealthPercent: 0,
+    fleeRange: 8,
+    rangedAttack: false,
+    rangedRange: 12
+  }
   let current = block
   while (current) {
-    if (current.type === 'ai_idle_wander') config.wander = true
-    if (current.type === 'ai_chase_player') config.chaseRange = getNumber(current, 'RANGE', 16)
-    if (current.type === 'ai_melee_attack') config.attackRange = getNumber(current, 'RANGE', 2)
+    switch (current.type) {
+      case 'ai_idle_wander':
+        config.wander = true
+        break
+      case 'ai_chase_player':
+        config.chaseRange = getNumber(current, 'RANGE', 16)
+        break
+      case 'ai_melee_attack':
+        config.attackRange = getNumber(current, 'RANGE', 2)
+        break
+      case 'ai_flee_player':
+        config.fleeHealthPercent = getNumber(current, 'HEALTH_PERCENT', 30)
+        config.fleeRange = getNumber(current, 'RANGE', 8)
+        break
+      case 'ai_ranged_attack':
+        config.rangedAttack = true
+        config.rangedRange = getNumber(current, 'RANGE', 12)
+        break
+    }
     current = current.getNextBlock()
   }
   return config
 }
 
 function parseMobAnims(block: Blockly.Block | null): MobAnimConfig {
-  const config: MobAnimConfig = { idle: 'idle', walk: 'walk', attack: 'attack' }
+  const config: MobAnimConfig = { idle: 'idle', walk: 'walk', attack: 'attack', hurt: 'hurt' }
   let current = block
   while (current) {
     if (current.type === 'anim_when_idle') config.idle = current.getFieldValue('ANIM')
     if (current.type === 'anim_when_moving') config.walk = current.getFieldValue('ANIM')
     if (current.type === 'anim_when_attacking') config.attack = current.getFieldValue('ANIM')
+    if (current.type === 'anim_when_hurt') config.hurt = current.getFieldValue('ANIM')
     current = current.getNextBlock()
   }
   return config
+}
+
+function parseItemBehaviors(block: Blockly.Block, modId: string): Pick<
+  ItemDef,
+  'rightClickActions' | 'shiftRightClickActions' | 'hitEntityActions'
+> {
+  const ctx: ActionContext = { modId, indent: '            ' }
+  const hitCtx: ActionContext = { modId, indent: '            ', targetVar: 'target' }
+  const rightClickActions: string[] = []
+  const shiftRightClickActions: string[] = []
+  const hitEntityActions: string[] = []
+
+  let behavior = block.getInputTargetBlock('BEHAVIORS')
+  while (behavior) {
+    if (behavior.type === 'on_right_click') {
+      rightClickActions.push(...getActions(behavior, 'ACTIONS', ctx))
+    }
+    if (behavior.type === 'on_shift_right_click') {
+      shiftRightClickActions.push(...getActions(behavior, 'ACTIONS', ctx))
+    }
+    if (behavior.type === 'on_hit_entity') {
+      hitEntityActions.push(...getActions(behavior, 'ACTIONS', hitCtx))
+    }
+    behavior = behavior.getNextBlock()
+  }
+
+  return { rightClickActions, shiftRightClickActions, hitEntityActions }
+}
+
+function parseBlockBehaviors(block: Blockly.Block, modId: string): Pick<
+  BlockDef,
+  'interactActions' | 'stepOnActions' | 'breakActions'
+> {
+  const ctx: ActionContext = { modId, indent: '            ' }
+  const interactActions: string[] = []
+  const stepOnActions: string[] = []
+  const breakActions: string[] = []
+
+  let behavior = block.getInputTargetBlock('BEHAVIORS')
+  while (behavior) {
+    if (behavior.type === 'on_block_interact') {
+      interactActions.push(...getActions(behavior, 'ACTIONS', ctx))
+    }
+    if (behavior.type === 'on_block_step') {
+      stepOnActions.push(...getActions(behavior, 'ACTIONS', ctx))
+    }
+    if (behavior.type === 'on_block_break') {
+      breakActions.push(...getActions(behavior, 'ACTIONS', ctx))
+    }
+    behavior = behavior.getNextBlock()
+  }
+
+  return { interactActions, stepOnActions, breakActions }
 }
 
 export function parseWorkspace(workspace: Blockly.Workspace, meta: ProjectMeta): ParsedProject {
@@ -54,6 +136,8 @@ export function parseWorkspace(workspace: Blockly.Workspace, meta: ProjectMeta):
   const armors: ArmorDef[] = []
   const mobs: MobDef[] = []
   const emotes: EmoteDef[] = []
+  const commands: CommandDef[] = []
+  const globalEvents: GlobalEventDef[] = []
 
   const topBlocks = workspace.getTopBlocks(true)
   for (const block of topBlocks) {
@@ -61,45 +145,37 @@ export function parseWorkspace(workspace: Blockly.Workspace, meta: ProjectMeta):
       meta.modId = block.getFieldValue('MOD_ID') || meta.modId
       meta.modName = block.getFieldValue('MOD_NAME') || meta.modName
     }
+
     if (block.type === 'register_item') {
       const id = block.getFieldValue('ITEM_ID')
-      const ctx: ActionContext = { modId: meta.modId, indent: '            ' }
-      const rightClickActions: string[] = []
-      let behavior = block.getInputTargetBlock('BEHAVIORS')
-      while (behavior) {
-        if (behavior.type === 'on_right_click') {
-          rightClickActions.push(...getActions(behavior, 'ACTIONS', ctx))
-        }
-        behavior = behavior.getNextBlock()
-      }
+      const behaviors = parseItemBehaviors(block, meta.modId)
       items.push({
         id,
         name: block.getFieldValue('ITEM_NAME'),
         texture: block.getFieldValue('TEXTURE'),
         className: `${toClassName(id)}Item`,
-        rightClickActions
+        maxStack: getNumber(block, 'MAX_STACK', 64),
+        food: block.getFieldValue('IS_FOOD') === 'TRUE',
+        foodNutrition: getNumber(block, 'FOOD_AMOUNT', 4),
+        foodSaturation: getNumber(block, 'FOOD_SATURATION', 0.3),
+        ...behaviors
       })
     }
+
     if (block.type === 'register_block') {
       const id = block.getFieldValue('BLOCK_ID')
-      const ctx: ActionContext = { modId: meta.modId, indent: '            ' }
-      const interactActions: string[] = []
-      let behavior = block.getInputTargetBlock('BEHAVIORS')
-      while (behavior) {
-        if (behavior.type === 'on_block_interact') {
-          interactActions.push(...getActions(behavior, 'ACTIONS', ctx))
-        }
-        behavior = behavior.getNextBlock()
-      }
+      const behaviors = parseBlockBehaviors(block, meta.modId)
       blocks.push({
         id,
         name: block.getFieldValue('BLOCK_NAME'),
         texture: block.getFieldValue('TEXTURE'),
         hardness: getNumber(block, 'HARDNESS', 2),
+        lightLevel: getNumber(block, 'LIGHT', 0),
         className: `${toClassName(id)}Block`,
-        interactActions
+        ...behaviors
       })
     }
+
     if (block.type === 'register_armor') {
       const id = block.getFieldValue('ARMOR_ID')
       armors.push({
@@ -111,6 +187,7 @@ export function parseWorkspace(workspace: Blockly.Workspace, meta: ProjectMeta):
         className: `${toClassName(id)}ArmorItem`
       })
     }
+
     if (block.type === 'register_mob') {
       const id = block.getFieldValue('MOB_ID')
       mobs.push({
@@ -127,6 +204,7 @@ export function parseWorkspace(workspace: Blockly.Workspace, meta: ProjectMeta):
         anims: parseMobAnims(block.getInputTargetBlock('ANIMATIONS'))
       })
     }
+
     if (block.type === 'register_emote') {
       emotes.push({
         id: block.getFieldValue('EMOTE_ID'),
@@ -137,8 +215,36 @@ export function parseWorkspace(workspace: Blockly.Workspace, meta: ProjectMeta):
         duration: getNumber(block, 'DURATION', 2)
       })
     }
+
+    if (block.type === 'register_command') {
+      const ctx: ActionContext = { modId: meta.modId, indent: '                ' }
+      commands.push({
+        name: block.getFieldValue('COMMAND_NAME'),
+        actions: getActions(block, 'ACTIONS', ctx)
+      })
+    }
+
+    if (block.type === 'on_player_join') {
+      const ctx: ActionContext = { modId: meta.modId, indent: '            ' }
+      globalEvents.push({ type: 'player_join', actions: getActions(block, 'ACTIONS', ctx) })
+    }
+
+    if (block.type === 'on_player_death') {
+      const ctx: ActionContext = { modId: meta.modId, indent: '            ' }
+      globalEvents.push({ type: 'player_death', actions: getActions(block, 'ACTIONS', ctx) })
+    }
+
+    if (block.type === 'on_player_respawn') {
+      const ctx: ActionContext = { modId: meta.modId, indent: '            ' }
+      globalEvents.push({ type: 'player_respawn', actions: getActions(block, 'ACTIONS', ctx) })
+    }
+
+    if (block.type === 'on_server_tick') {
+      const ctx: ActionContext = { modId: meta.modId, indent: '            ', worldVar: 'server.overworld()' }
+      globalEvents.push({ type: 'server_tick', actions: getActions(block, 'ACTIONS', ctx) })
+    }
   }
 
   const pkg = `com.visualcoding.${meta.modId.replace(/[^a-z0-9_]/g, '')}`
-  return { meta, pkg, items, blocks, armors, mobs, emotes }
+  return { meta, pkg, items, blocks, armors, mobs, emotes, commands, globalEvents }
 }

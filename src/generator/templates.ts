@@ -1,7 +1,9 @@
 import {
   ArmorDef,
   BlockDef,
+  CommandDef,
   EmoteDef,
+  GlobalEventDef,
   ItemDef,
   MobDef,
   ProjectMeta,
@@ -15,13 +17,19 @@ function pkgPath(pkg: string): string {
 }
 
 export function generateAllFiles(parsed: ParsedProject): Record<string, string> {
-  const { meta, pkg, items, blocks, armors, mobs, emotes } = parsed
+  const { meta, pkg, items, blocks, armors, mobs, emotes, commands, globalEvents } = parsed
   const files: Record<string, string> = {}
   const clientRoot = `src/client/java/${pkgPath(pkg)}`
 
   files['gradle.properties'] = generateGradleProperties(meta)
   files['build.gradle'] = generateBuildGradle(parsed)
   files[`src/main/java/${pkgPath(pkg)}/${toClassName(meta.modId)}Mod.java`] = generateMainMod(parsed)
+  if (commands.length > 0) {
+    files[`src/main/java/${pkgPath(pkg)}/ModCommands.java`] = generateModCommands(pkg, commands)
+  }
+  if (globalEvents.length > 0 || blocks.some((b) => b.breakActions.length > 0)) {
+    files[`src/main/java/${pkgPath(pkg)}/ModEvents.java`] = generateModEvents(pkg, globalEvents, blocks)
+  }
   files[`src/main/java/${pkgPath(pkg)}/ModItems.java`] = generateModItems(pkg, meta.modId, items, armors)
   files[`src/main/java/${pkgPath(pkg)}/ModBlocks.java`] = generateModBlocks(pkg, meta.modId, blocks)
   files[`src/main/java/${pkgPath(pkg)}/ModEntities.java`] = generateModEntities(pkg, meta.modId, mobs)
@@ -247,7 +255,7 @@ function generateLang(
 }
 
 function generateMainMod(parsed: ParsedProject): string {
-  const { pkg, meta, emotes, mobs } = parsed
+  const { pkg, meta, emotes, mobs, commands, globalEvents, blocks } = parsed
   const className = `${toClassName(meta.modId)}Mod`
   const emoteRegistrations = emotes
     .map((e) => `        EmoteRegistry.register("${e.command}", new ${toClassName(e.id)}Emote());`)
@@ -258,12 +266,15 @@ function generateMainMod(parsed: ParsedProject): string {
         `        FabricDefaultAttributeRegistry.register(ModEntities.${toConstant(m.id)}, ${m.className}.createAttributes());`
     )
     .join('\n')
+  const hasModEvents = globalEvents.length > 0 || blocks.some((b) => b.breakActions.length > 0)
+  const modEventsImport = hasModEvents ? `import ${pkg}.ModEvents;\n` : ''
+  const modCommandsImport = commands.length > 0 ? `import ${pkg}.ModCommands;\n` : ''
 
   return `package ${pkg};
 
 import ${pkg}.emote.*;
 import ${pkg}.network.VisualCodingNetworking;
-import net.fabricmc.api.ModInitializer;
+${modEventsImport}${modCommandsImport}import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -280,6 +291,8 @@ public class ${className} implements ModInitializer {
         ModParticles.register();
 ${attrRegs || '        // No mob attributes'}
         VisualCodingNetworking.registerServer();
+${hasModEvents ? '        ModEvents.register();' : ''}
+${commands.length ? '        ModCommands.register();' : ''}
 ${emoteRegistrations || '        // No emotes'}
 ${emotes.length ? '        EmoteRegistry.registerCommands();' : ''}
 
@@ -342,17 +355,39 @@ ${armorRegs || '        // No armor'}
 }
 
 function generateItemClass(pkg: string, item: ItemDef): string {
-  const useMethod =
-    item.rightClickActions.length > 0
-      ? `
+  const hasUse = item.rightClickActions.length > 0 || item.shiftRightClickActions.length > 0
+  const hasHit = item.hitEntityActions.length > 0
+
+  const useMethod = hasUse
+    ? `
     @Override
     public InteractionResult use(Level world, Player player, InteractionHand hand) {
         if (!world.isClientSide()) {
-${item.rightClickActions.join('\n')}
+            if (player.isShiftKeyDown()) {
+${item.shiftRightClickActions.length ? item.shiftRightClickActions.join('\n') : '                // No shift-right-click actions'}
+            } else {
+${item.rightClickActions.length ? item.rightClickActions.join('\n') : '                // No right-click actions'}
+            }
         }
         return InteractionResult.SUCCESS;
     }`
-      : ''
+    : ''
+
+  const hitMethod = hasHit
+    ? `
+    @Override
+    public boolean hurtEnemy(ItemStack stack, LivingEntity target, LivingEntity attacker) {
+        if (attacker instanceof Player player && !player.level().isClientSide()) {
+            Level world = player.level();
+${item.hitEntityActions.join('\n')}
+        }
+        return super.hurtEnemy(stack, target, attacker);
+    }`
+    : ''
+
+  const propsBuilder = item.food
+    ? `super(settings.food(new FoodProperties.Builder().nutrition(${item.foodNutrition}).saturationModifier(${item.foodSaturation}f).build()).stacksTo(${item.maxStack}));`
+    : `super(settings.stacksTo(${item.maxStack}));`
 
   return `package ${pkg}.item;
 
@@ -363,17 +398,22 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import ${pkg}.ModEntities;
+import ${pkg}.ModItems;
 import ${pkg}.ModParticles;
 import ${pkg}.VisualEffects;
 
 public class ${item.className} extends Item {
     public ${item.className}(Item.Properties settings) {
-        super(settings);
+        ${propsBuilder}
     }
-${useMethod}
+${useMethod}${hitMethod}
 }
 `
 }
@@ -437,6 +477,20 @@ ${block.interactActions.join('\n')}
     }`
       : ''
 
+  const stepMethod =
+    block.stepOnActions.length > 0
+      ? `
+    @Override
+    public void stepOn(Level world, BlockPos pos, BlockState state, Entity entity) {
+        if (!world.isClientSide() && entity instanceof Player player) {
+${block.stepOnActions.join('\n')}
+        }
+        super.stepOn(world, pos, state, entity);
+    }`
+      : ''
+
+  const lightProp = block.lightLevel > 0 ? `.lightLevel(state -> ${block.lightLevel})` : ''
+
   return `package ${pkg}.block;
 
 import net.minecraft.core.BlockPos;
@@ -446,22 +500,24 @@ import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
-import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
+import ${pkg}.ModEntities;
+import ${pkg}.ModItems;
 import ${pkg}.ModParticles;
 import ${pkg}.VisualEffects;
 
 public class ${block.className} extends Block {
     public ${block.className}(ResourceKey<Block> key) {
-        super(BlockBehaviour.Properties.of().setId(key).strength(${block.hardness}f));
+        super(BlockBehaviour.Properties.of().setId(key).strength(${block.hardness}f)${lightProp});
     }
-${useMethod}
+${useMethod}${stepMethod}
 }
 `
 }
@@ -517,9 +573,45 @@ ${regs || '        // No mobs'}
 
 function generateMobEntity(pkg: string, mob: MobDef): string {
   const goals: string[] = []
-  if (mob.ai.wander) goals.push('        this.goalSelector.addGoal(5, new RandomStrollGoal(this, 1.0));')
-  goals.push('        this.goalSelector.addGoal(2, new MeleeAttackGoal(this, 1.0, false));')
-  goals.push('        this.targetSelector.addGoal(2, new NearestAttackableTargetGoal<>(this, Player.class, true));')
+  if (mob.ai.fleeHealthPercent > 0) {
+    goals.push(`        this.goalSelector.addGoal(1, new PanicGoal(this, 1.25));`)
+  }
+  if (mob.ai.rangedAttack) {
+    goals.push(
+      `        this.goalSelector.addGoal(1, new RangedAttackGoal(this, 1.0, 20, ${mob.ai.rangedRange}f));`
+    )
+  }
+  goals.push(`        this.goalSelector.addGoal(2, new MeleeAttackGoal(this, 1.0, false));`)
+  if (mob.ai.chaseRange > 0) {
+    goals.push(
+      `        this.targetSelector.addGoal(2, new NearestAttackableTargetGoal<>(this, Player.class, true));`
+    )
+  }
+  if (mob.ai.wander) {
+    goals.push('        this.goalSelector.addGoal(5, new RandomStrollGoal(this, 1.0));')
+  }
+  goals.push('        this.goalSelector.addGoal(7, new LookAtPlayerGoal(this, Player.class, 8.0f));')
+  goals.push('        this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));')
+
+  const rangedInterface = mob.ai.rangedAttack ? ', RangedAttackMob' : ''
+  const rangedImports = mob.ai.rangedAttack
+    ? `import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.monster.RangedAttackMob;
+import net.minecraft.world.entity.projectile.SmallFireball;
+import net.minecraft.server.level.ServerLevel;
+`
+    : ''
+  const rangedMethod = mob.ai.rangedAttack
+    ? `
+    @Override
+    public void performRangedAttack(LivingEntity target, float pullProgress) {
+        if (!(this.level() instanceof ServerLevel serverLevel)) return;
+        SmallFireball fireball = new SmallFireball(serverLevel, this, target.getX() - this.getX(), target.getY(0.5) - this.getY(0.5), target.getZ() - this.getZ());
+        fireball.setPos(this.getX(), this.getEyeY() - 0.1, this.getZ());
+        serverLevel.addFreshEntity(fireball);
+    }
+`
+    : ''
 
   return `package ${pkg}.entity;
 
@@ -530,14 +622,16 @@ import net.minecraft.world.entity.ai.goal.*;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
-import software.bernie.geckolib.animatable.GeoEntity;
+${rangedImports}import software.bernie.geckolib.animatable.GeoEntity;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
 import software.bernie.geckolib.animation.*;
 import software.bernie.geckolib.util.GeckoLibUtil;
 
-public class ${mob.className} extends Monster implements GeoEntity {
+public class ${mob.className} extends Monster implements GeoEntity${rangedInterface} {
     private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
     private boolean attacking = false;
+    private boolean hurtAnim = false;
+    private int hurtAnimTicks = 0;
 
     public ${mob.className}(EntityType<? extends Monster> type, Level world) {
         super(type, world);
@@ -554,21 +648,38 @@ public class ${mob.className} extends Monster implements GeoEntity {
     protected void registerGoals() {
 ${goals.join('\n')}
     }
-
+${rangedMethod}
     @Override
     public void tick() {
         super.tick();
         if (this.swinging) attacking = true;
         else if (attacking && !this.swinging) attacking = false;
+        if (hurtAnimTicks > 0) hurtAnimTicks--;
+        else hurtAnim = false;
+    }
+
+    @Override
+    public boolean hurt(net.minecraft.world.damagesource.DamageSource source, float amount) {
+        boolean result = super.hurt(source, amount);
+        if (result) {
+            hurtAnim = true;
+            hurtAnimTicks = 10;
+        }
+        return result;
     }
 
     public boolean isAttackingAnim() {
         return attacking;
     }
 
+    public boolean isHurtAnim() {
+        return hurtAnim;
+    }
+
     @Override
     public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
         controllers.add(new AnimationController<>(this, "controller", 0, state -> {
+            if (isHurtAnim()) return state.setAndContinue(RawAnimation.begin().thenPlay("${mob.anims.hurt}"));
             if (isAttackingAnim()) return state.setAndContinue(RawAnimation.begin().thenLoop("${mob.anims.attack}"));
             if (getDeltaMovement().horizontalDistanceSqr() > 1.0E-6) return state.setAndContinue(RawAnimation.begin().thenLoop("${mob.anims.walk}"));
             return state.setAndContinue(RawAnimation.begin().thenLoop("${mob.anims.idle}"));
@@ -706,8 +817,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.SimpleParticleType;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LightningBolt;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
 
 public final class VisualEffects {
     private VisualEffects() {}
@@ -730,6 +845,51 @@ public final class VisualEffects {
     public static void shakeScreen(Player player, float intensity, float duration) {
         if (player instanceof ServerPlayer serverPlayer) {
             VisualCodingNetworking.sendScreenshake(serverPlayer, intensity, duration);
+        }
+    }
+
+    public static void teleport(Player player, double x, double y, double z) {
+        player.teleportTo(x, y, z);
+    }
+
+    public static void strikeLightning(Level world, BlockPos pos) {
+        if (!(world instanceof ServerLevel serverLevel)) return;
+        LightningBolt bolt = EntityType.LIGHTNING_BOLT.create(serverLevel);
+        if (bolt != null) {
+            bolt.moveTo(Vec3.atBottomCenterOf(pos));
+            serverLevel.addFreshEntity(bolt);
+        }
+    }
+
+    public static void explode(Level world, BlockPos pos, float power) {
+        if (!(world instanceof ServerLevel serverLevel)) return;
+        serverLevel.explode(null, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, power, Level.ExplosionInteraction.TNT);
+    }
+
+    public static void knockback(Player player, float strength) {
+        Vec3 look = player.getLookAngle().scale(-strength);
+        player.push(look.x, 0.4, look.z);
+    }
+
+    public static void giveItem(Player player, Item item, int count) {
+        player.getInventory().add(new net.minecraft.world.item.ItemStack(item, count));
+    }
+
+    public static void setClearWeather(Level world, int seconds) {
+        if (world instanceof ServerLevel serverLevel) {
+            serverLevel.setWeatherParameters(seconds * 20, 0, false, false);
+        }
+    }
+
+    public static <T extends net.minecraft.world.entity.Entity> void summonMob(
+            Level world, EntityType<T> type, BlockPos pos, int count) {
+        if (!(world instanceof ServerLevel serverLevel)) return;
+        for (int i = 0; i < count; i++) {
+            T entity = type.create(serverLevel);
+            if (entity != null) {
+                entity.moveTo(pos.getX() + 0.5, pos.getY() + 1, pos.getZ() + 0.5, world.getRandom().nextFloat() * 360f, 0);
+                serverLevel.addFreshEntity(entity);
+            }
         }
     }
 }
@@ -907,6 +1067,130 @@ public class ${toClassName(emote.id)}Emote implements EmoteHandler {
     @Override
     public void play(ServerPlayer player) {
         EmotePlayer.play(player, this);
+    }
+}
+`
+}
+
+function generateModCommands(pkg: string, commands: CommandDef[]): string {
+  const registrations = commands
+    .map((cmd) => {
+      const body = cmd.actions.length ? cmd.actions.join('\n') : '                // No actions'
+      return `        dispatcher.register(Commands.literal("${cmd.name}")
+            .executes(ctx -> {
+                ServerPlayer player = ctx.getSource().getPlayerOrException();
+                Level world = player.level();
+${body}
+                return 1;
+            }));`
+    })
+    .join('\n')
+
+  return `package ${pkg};
+
+import com.mojang.brigadier.CommandDispatcher;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.level.Level;
+import ${pkg}.ModEntities;
+import ${pkg}.ModItems;
+import ${pkg}.ModParticles;
+import ${pkg}.VisualEffects;
+
+public final class ModCommands {
+    private ModCommands() {}
+
+    public static void register() {
+        CommandRegistrationCallback.EVENT.register(ModCommands::registerCommands);
+    }
+
+    private static void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher, net.minecraft.commands.CommandBuildContext registry, net.minecraft.commands.Commands.CommandSelection env) {
+${registrations}
+    }
+}
+`
+}
+
+function generateModEvents(pkg: string, globalEvents: GlobalEventDef[], blocks: BlockDef[]): string {
+  const handlers: string[] = []
+
+  for (const event of globalEvents) {
+    const body = event.actions.length ? event.actions.join('\n') : '            // No actions'
+    if (event.type === 'player_join') {
+      handlers.push(`        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            ServerPlayer player = handler.getPlayer();
+            Level world = player.level();
+${body}
+        });`)
+    }
+    if (event.type === 'player_death') {
+      handlers.push(`        ServerLivingEntityEvents.AFTER_DEATH.register((entity, damageSource) -> {
+            if (entity instanceof ServerPlayer player) {
+                Level world = player.level();
+${body}
+            }
+        });`)
+    }
+    if (event.type === 'player_respawn') {
+      handlers.push(`        ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
+            ServerPlayer player = newPlayer;
+            Level world = player.level();
+${body}
+        });`)
+    }
+    if (event.type === 'server_tick') {
+      handlers.push(`        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            Level world = server.overworld();
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+${body}
+            }
+        });`)
+    }
+  }
+
+  for (const block of blocks) {
+    if (block.breakActions.length === 0) continue
+    handlers.push(`        PlayerBlockBreakEvents.AFTER.register((world, player, pos, state, blockEntity) -> {
+            if (state.is(ModBlocks.${toConstant(block.id)})) {
+${block.breakActions.join('\n')}
+            }
+        });`)
+  }
+
+  const body = handlers.length ? handlers.join('\n\n') : '        // No global events'
+
+  return `package ${pkg};
+
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.level.Level;
+import ${pkg}.ModBlocks;
+import ${pkg}.ModEntities;
+import ${pkg}.ModItems;
+import ${pkg}.ModParticles;
+import ${pkg}.VisualEffects;
+
+public final class ModEvents {
+    private ModEvents() {}
+
+    public static void register() {
+${body}
     }
 }
 `

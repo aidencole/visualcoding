@@ -31,6 +31,8 @@ export interface ProjectMeta {
 export interface ActionContext {
   modId: string
   playerVar?: string
+  targetVar?: string
+  worldVar?: string
   indent: string
 }
 
@@ -38,12 +40,17 @@ export interface MobAIConfig {
   wander: boolean
   chaseRange: number
   attackRange: number
+  fleeHealthPercent: number
+  fleeRange: number
+  rangedAttack: boolean
+  rangedRange: number
 }
 
 export interface MobAnimConfig {
   idle: string
   walk: string
   attack: string
+  hurt: string
 }
 
 export interface ItemDef {
@@ -51,7 +58,13 @@ export interface ItemDef {
   name: string
   texture: string
   className: string
+  maxStack: number
+  food: boolean
+  foodNutrition: number
+  foodSaturation: number
   rightClickActions: string[]
+  shiftRightClickActions: string[]
+  hitEntityActions: string[]
 }
 
 export interface BlockDef {
@@ -59,8 +72,11 @@ export interface BlockDef {
   name: string
   texture: string
   hardness: number
+  lightLevel: number
   className: string
   interactActions: string[]
+  stepOnActions: string[]
+  breakActions: string[]
 }
 
 export interface ArmorDef {
@@ -93,4 +109,14 @@ export interface EmoteDef {
   command: string
   lockMovement: boolean
   duration: number
+}
+
+export interface CommandDef {
+  name: string
+  actions: string[]
+}
+
+export interface GlobalEventDef {
+  type: 'player_join' | 'player_death' | 'player_respawn' | 'server_tick'
+  actions: string[]
 }

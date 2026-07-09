@@ -11,6 +11,7 @@ import {
   toConstant
 } from './utils'
 import { ParsedProject } from './parser'
+import { generateModScheduler, generateVisualCodingActions } from './java-helpers'
 
 function pkgPath(pkg: string): string {
   return pkg.replace(/\./g, '/')
@@ -27,14 +28,14 @@ export function generateAllFiles(parsed: ParsedProject): Record<string, string> 
   if (commands.length > 0) {
     files[`src/main/java/${pkgPath(pkg)}/ModCommands.java`] = generateModCommands(pkg, commands)
   }
-  if (globalEvents.length > 0 || blocks.some((b) => b.breakActions.length > 0)) {
-    files[`src/main/java/${pkgPath(pkg)}/ModEvents.java`] = generateModEvents(pkg, globalEvents, blocks)
-  }
+  files[`src/main/java/${pkgPath(pkg)}/ModEvents.java`] = generateModEvents(pkg, globalEvents, blocks)
   files[`src/main/java/${pkgPath(pkg)}/ModItems.java`] = generateModItems(pkg, meta.modId, items, armors)
   files[`src/main/java/${pkgPath(pkg)}/ModBlocks.java`] = generateModBlocks(pkg, meta.modId, blocks)
   files[`src/main/java/${pkgPath(pkg)}/ModEntities.java`] = generateModEntities(pkg, meta.modId, mobs)
   files[`src/main/java/${pkgPath(pkg)}/ModParticles.java`] = generateModParticles(pkg, meta.modId)
   files[`src/main/java/${pkgPath(pkg)}/VisualEffects.java`] = generateVisualEffects(pkg)
+  files[`src/main/java/${pkgPath(pkg)}/VisualCodingActions.java`] = generateVisualCodingActions(pkg)
+  files[`src/main/java/${pkgPath(pkg)}/ModScheduler.java`] = generateModScheduler(pkg)
   files[`src/main/java/${pkgPath(pkg)}/network/ScreenshakePayload.java`] = generateScreenshakePayload(
     pkg,
     meta.modId
@@ -266,7 +267,7 @@ function generateMainMod(parsed: ParsedProject): string {
         `        FabricDefaultAttributeRegistry.register(ModEntities.${toConstant(m.id)}, ${m.className}.createAttributes());`
     )
     .join('\n')
-  const hasModEvents = globalEvents.length > 0 || blocks.some((b) => b.breakActions.length > 0)
+  const hasModEvents = true
   const modEventsImport = hasModEvents ? `import ${pkg}.ModEvents;\n` : ''
   const modCommandsImport = commands.length > 0 ? `import ${pkg}.ModCommands;\n` : ''
 
@@ -357,6 +358,8 @@ ${armorRegs || '        // No armor'}
 function generateItemClass(pkg: string, item: ItemDef): string {
   const hasUse = item.rightClickActions.length > 0 || item.shiftRightClickActions.length > 0
   const hasHit = item.hitEntityActions.length > 0
+  const hasUseOn = item.leftClickBlockActions.length > 0
+  const hasFinish = item.finishUsingActions.length > 0
 
   const useMethod = hasUse
     ? `
@@ -373,6 +376,19 @@ ${item.rightClickActions.length ? item.rightClickActions.join('\n') : '         
     }`
     : ''
 
+  const useOnMethod = hasUseOn
+    ? `
+    @Override
+    public InteractionResult useOn(UseOnContext context) {
+        if (!context.getLevel().isClientSide() && context.getPlayer() != null) {
+            Player player = context.getPlayer();
+            Level world = context.getLevel();
+${item.leftClickBlockActions.join('\n')}
+        }
+        return InteractionResult.SUCCESS;
+    }`
+    : ''
+
   const hitMethod = hasHit
     ? `
     @Override
@@ -382,6 +398,18 @@ ${item.rightClickActions.length ? item.rightClickActions.join('\n') : '         
 ${item.hitEntityActions.join('\n')}
         }
         return super.hurtEnemy(stack, target, attacker);
+    }`
+    : ''
+
+  const finishMethod = hasFinish
+    ? `
+    @Override
+    public ItemStack finishUsingItem(ItemStack stack, Level world, LivingEntity user) {
+        if (user instanceof Player player && !world.isClientSide()) {
+            Level level = world;
+${item.finishUsingActions.join('\n')}
+        }
+        return super.finishUsingItem(stack, world, user);
     }`
     : ''
 
@@ -403,17 +431,19 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import ${pkg}.ModEntities;
 import ${pkg}.ModItems;
 import ${pkg}.ModParticles;
+import ${pkg}.VisualCodingActions;
 import ${pkg}.VisualEffects;
 
 public class ${item.className} extends Item {
     public ${item.className}(Item.Properties settings) {
         ${propsBuilder}
     }
-${useMethod}${hitMethod}
+${useMethod}${useOnMethod}${hitMethod}${finishMethod}
 }
 `
 }
@@ -511,6 +541,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import ${pkg}.ModEntities;
 import ${pkg}.ModItems;
 import ${pkg}.ModParticles;
+import ${pkg}.VisualCodingActions;
 import ${pkg}.VisualEffects;
 
 public class ${block.className} extends Block {
@@ -818,7 +849,6 @@ import net.minecraft.core.particles.SimpleParticleType;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.LightningBolt;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.Level;
@@ -853,11 +883,8 @@ public final class VisualEffects {
     }
 
     public static void strikeLightning(Level world, BlockPos pos) {
-        if (!(world instanceof ServerLevel serverLevel)) return;
-        LightningBolt bolt = EntityType.LIGHTNING_BOLT.create(serverLevel);
-        if (bolt != null) {
-            bolt.moveTo(Vec3.atBottomCenterOf(pos));
-            serverLevel.addFreshEntity(bolt);
+        if (world instanceof ServerLevel serverLevel) {
+            VisualCodingActions.strikeLightning(serverLevel, pos);
         }
     }
 
@@ -877,19 +904,14 @@ public final class VisualEffects {
 
     public static void setClearWeather(Level world, int seconds) {
         if (world instanceof ServerLevel serverLevel) {
-            serverLevel.setWeatherParameters(seconds * 20, 0, false, false);
+            VisualCodingActions.setClearWeather(serverLevel, seconds);
         }
     }
 
     public static <T extends net.minecraft.world.entity.Entity> void summonMob(
             Level world, EntityType<T> type, BlockPos pos, int count) {
-        if (!(world instanceof ServerLevel serverLevel)) return;
-        for (int i = 0; i < count; i++) {
-            T entity = type.create(serverLevel);
-            if (entity != null) {
-                entity.moveTo(pos.getX() + 0.5, pos.getY() + 1, pos.getZ() + 0.5, world.getRandom().nextFloat() * 360f, 0);
-                serverLevel.addFreshEntity(entity);
-            }
+        if (world instanceof ServerLevel serverLevel) {
+            VisualCodingActions.summonEntity(serverLevel, type, pos, count);
         }
     }
 }
@@ -1093,15 +1115,18 @@ import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import ${pkg}.ModEntities;
 import ${pkg}.ModItems;
 import ${pkg}.ModParticles;
+import ${pkg}.VisualCodingActions;
 import ${pkg}.VisualEffects;
 
 public final class ModCommands {
@@ -1119,7 +1144,9 @@ ${registrations}
 }
 
 function generateModEvents(pkg: string, globalEvents: GlobalEventDef[], blocks: BlockDef[]): string {
-  const handlers: string[] = []
+  const handlers: string[] = [
+    `        ServerTickEvents.END_WORLD_TICK.register(ModScheduler::tick);`
+  ]
 
   for (const event of globalEvents) {
     const body = event.actions.length ? event.actions.join('\n') : '            // No actions'
@@ -1153,6 +1180,35 @@ ${body}
             }
         });`)
     }
+    if (event.type === 'player_damage') {
+      handlers.push(`        ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
+            if (entity instanceof ServerPlayer player) {
+                Level world = player.level();
+${body}
+            }
+            return true;
+        });`)
+    }
+    if (event.type === 'player_chat') {
+      handlers.push(`        ServerMessageEvents.ALLOW_CHAT_MESSAGE.register((message, sender, params) -> {
+            ServerPlayer player = sender;
+            Level world = player.level();
+${body}
+            return true;
+        });`)
+    }
+    if (event.type === 'block_place') {
+      handlers.push(`        PlayerBlockPlaceEvents.AFTER.register((world, player, pos, state, blockEntity) -> {
+            Level level = world;
+${body}
+        });`)
+    }
+    if (event.type === 'item_pickup') {
+      handlers.push(`        EntityPickupEvents.ENTITY_PICKUP.register((world, player, itemEntity, stack) -> {
+            Level level = world;
+${body}
+        });`)
+    }
   }
 
   for (const block of blocks) {
@@ -1172,18 +1228,25 @@ import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
+import net.fabricmc.fabric.api.event.player.PlayerBlockPlaceEvents;
+import net.fabricmc.fabric.api.message.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.fabricmc.fabric.api.event.player.EntityPickupEvents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import ${pkg}.ModBlocks;
 import ${pkg}.ModEntities;
 import ${pkg}.ModItems;
 import ${pkg}.ModParticles;
+import ${pkg}.ModScheduler;
+import ${pkg}.VisualCodingActions;
 import ${pkg}.VisualEffects;
 
 public final class ModEvents {

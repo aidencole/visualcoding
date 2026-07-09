@@ -1,5 +1,8 @@
 import * as Blockly from 'blockly'
 import { ActionContext, escapeJava, getNumber, toConstant } from './utils'
+import { generateExtraAction } from './extra-action-cases'
+
+// Note: getActions is used by extra-action-cases for nested logic/actions
 
 const EFFECT_MAP: Record<string, string> = {
   SPEED: 'MobEffects.MOVEMENT_SPEED',
@@ -263,6 +266,11 @@ export function generateAction(block: Blockly.Block, ctx: ActionContext): string
       lines.push(
         `${indent}${worldVar}.getServer().getCommands().performPrefixedCommand(${playerVar}.createCommandSourceStack(), "${escapeJava(cmd)}");`
       )
+      break
+    }
+    default: {
+      const extra = generateExtraAction(block, ctx)
+      if (extra) lines.push(...extra)
       break
     }
   }

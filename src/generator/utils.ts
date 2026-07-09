@@ -65,6 +65,8 @@ export interface ItemDef {
   rightClickActions: string[]
   shiftRightClickActions: string[]
   hitEntityActions: string[]
+  leftClickBlockActions: string[]
+  finishUsingActions: string[]
 }
 
 export interface BlockDef {
@@ -117,6 +119,14 @@ export interface CommandDef {
 }
 
 export interface GlobalEventDef {
-  type: 'player_join' | 'player_death' | 'player_respawn' | 'server_tick'
+  type:
+    | 'player_join'
+    | 'player_death'
+    | 'player_respawn'
+    | 'server_tick'
+    | 'player_damage'
+    | 'player_chat'
+    | 'block_place'
+    | 'item_pickup'
   actions: string[]
 }

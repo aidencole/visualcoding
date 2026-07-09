@@ -79,13 +79,19 @@ function parseMobAnims(block: Blockly.Block | null): MobAnimConfig {
 
 function parseItemBehaviors(block: Blockly.Block, modId: string): Pick<
   ItemDef,
-  'rightClickActions' | 'shiftRightClickActions' | 'hitEntityActions'
+  | 'rightClickActions'
+  | 'shiftRightClickActions'
+  | 'hitEntityActions'
+  | 'leftClickBlockActions'
+  | 'finishUsingActions'
 > {
   const ctx: ActionContext = { modId, indent: '            ' }
   const hitCtx: ActionContext = { modId, indent: '            ', targetVar: 'target' }
   const rightClickActions: string[] = []
   const shiftRightClickActions: string[] = []
   const hitEntityActions: string[] = []
+  const leftClickBlockActions: string[] = []
+  const finishUsingActions: string[] = []
 
   let behavior = block.getInputTargetBlock('BEHAVIORS')
   while (behavior) {
@@ -98,10 +104,22 @@ function parseItemBehaviors(block: Blockly.Block, modId: string): Pick<
     if (behavior.type === 'on_hit_entity') {
       hitEntityActions.push(...getActions(behavior, 'ACTIONS', hitCtx))
     }
+    if (behavior.type === 'on_left_click_block') {
+      leftClickBlockActions.push(...getActions(behavior, 'ACTIONS', ctx))
+    }
+    if (behavior.type === 'on_finish_using') {
+      finishUsingActions.push(...getActions(behavior, 'ACTIONS', ctx))
+    }
     behavior = behavior.getNextBlock()
   }
 
-  return { rightClickActions, shiftRightClickActions, hitEntityActions }
+  return {
+    rightClickActions,
+    shiftRightClickActions,
+    hitEntityActions,
+    leftClickBlockActions,
+    finishUsingActions
+  }
 }
 
 function parseBlockBehaviors(block: Blockly.Block, modId: string): Pick<
@@ -242,6 +260,26 @@ export function parseWorkspace(workspace: Blockly.Workspace, meta: ProjectMeta):
     if (block.type === 'on_server_tick') {
       const ctx: ActionContext = { modId: meta.modId, indent: '            ', worldVar: 'server.overworld()' }
       globalEvents.push({ type: 'server_tick', actions: getActions(block, 'ACTIONS', ctx) })
+    }
+
+    if (block.type === 'on_player_damage') {
+      const ctx: ActionContext = { modId: meta.modId, indent: '            ' }
+      globalEvents.push({ type: 'player_damage', actions: getActions(block, 'ACTIONS', ctx) })
+    }
+
+    if (block.type === 'on_player_chat') {
+      const ctx: ActionContext = { modId: meta.modId, indent: '            ' }
+      globalEvents.push({ type: 'player_chat', actions: getActions(block, 'ACTIONS', ctx) })
+    }
+
+    if (block.type === 'on_block_place') {
+      const ctx: ActionContext = { modId: meta.modId, indent: '            ' }
+      globalEvents.push({ type: 'block_place', actions: getActions(block, 'ACTIONS', ctx) })
+    }
+
+    if (block.type === 'on_item_pickup') {
+      const ctx: ActionContext = { modId: meta.modId, indent: '            ' }
+      globalEvents.push({ type: 'item_pickup', actions: getActions(block, 'ACTIONS', ctx) })
     }
   }
 
